@@ -1,10 +1,10 @@
 # Adversarial_regression
 ## Generative Adversarial Networks for Non-Linear Regression: Theory and Assessment
  
-Master Thesis: Yoann Boget
-Supervisor at SLAC: Micheal Kagan
-Supervisor at University of Neuchâtel: Clément Chevalier
-https://arxiv.org/abs/1910.09106
+Master Thesis: Yoann Boget  
+Supervisor at SLAC (Stanford University: Dr. Micheal Kagan  
+Supervisor at University of Neuchâtel: Dr. Clément Chevalier  
+https://arxiv.org/abs/1910.09106  
 Grade: 5.5/6 (Very good)
 
 ### Abstract
