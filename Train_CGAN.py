@@ -11,14 +11,14 @@ from CGAN import InferGAN
 
 
 class argstuff(object):
-    def __init__(self, epoch=100, batch_size=64, \
+    def __init__(self, epoch=10000, batch_size=1000, \
                  save_dir="models", result_dir="results", \
                 dataset="toy0", log_dir="logs", \
                 gpu_mode = False, gan_type="IGAN", \
                  noise_dist = "normal", \
-                lrG = 0.0002, lrD = 0.0002, \
-                 lr_decay_step = 5, \
-                beta1 = 0.5, beta2=0.999,
+                lrG = 0.0001, lrD = 0.0001, \
+                 lr_decay_step = 10000, \
+                beta1 = 0, beta2=0.9,
                 gammaMSE=0):
         
         self.epoch = epoch

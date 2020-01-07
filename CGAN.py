@@ -2,7 +2,7 @@
 #making use of:
 # https://github.com/znxlwm/pytorch-generative-model-collections
 # https://github.com/wiseodd/generative-models/tree/master/GAN
-# Make extensive use of https://github.com/makagan/InferenceGAN
+# Make use of https://github.com/makagan/InferenceGAN
 """
 @author: Yoann Boget
 """
@@ -17,6 +17,7 @@ from torch.autograd import Variable
 from IPython import display
 import matplotlib.pyplot as plt
 import seaborn as sns
+from scipy import stats as st
 from scipy.signal import medfilt
 
 
@@ -29,28 +30,48 @@ def true_X_given_Y(given_Y=0.5, model_number=3, slice_size=0.01, N=10000000):
     X_given_Y_true = XY[(XY[:,1]>(given_Y-(slice_size/2)))*(XY[:,1]<(given_Y+(slice_size/2))), 0]
     return X_given_Y_true
 
+def compute_distances(G_in, given_Y, noise_dist, n_samples=10000, n_test_samples=100000):
+    #device = to.device("cuda" if to.cuda.is_available() else "cpu")
+    device='cpu' 
+    G_in.eval()
+    z_ = get_random_inputs((n_samples,10), dist=noise_dist) 
 
+    y_ = np.asarray(given_Y).reshape((1,1))
+    y_ = to.from_numpy(y_).float().to(device).repeat(n_samples,1)
+    x_gen = G_in(z_.to(device), y_)
+    x_gen = x_gen.detach().cpu().numpy()
+    true_x=true_X_given_Y(given_Y)
+    nBins = 1000
+    MyRange= [-0.5, 1.5]
+    true_cond_dist,_,_ = plt.hist(true_x, bins=nBins,range=MyRange, density=True,histtype='step') 
+    gen_cond_dist,_ ,_ = plt.hist(x_gen, bins=nBins,range=MyRange, density=True,histtype='step')
+    plt.close()
+    
+    true_n_gen_cond= np.concatenate((np.expand_dims(true_cond_dist, axis=1),np.expand_dims(gen_cond_dist, axis=1)), axis=1)      
+    true_n_gen_cond= true_n_gen_cond[true_n_gen_cond[:,1]!=0,:]       
+                    
+    KL= st.entropy(true_n_gen_cond[:,0], true_n_gen_cond[:,1])            
+    m = 0.5 * (true_cond_dist+gen_cond_dist)
+    JS= 0.5 * (st.entropy(true_cond_dist, m) + st.entropy(gen_cond_dist,m))
+    return KL, JS             
+          
 def make_density_plot(G_in, given_Y, noise_dist, n_samples=10000, n_test_samples = 100000): 
     #device = to.device("cuda" if to.cuda.is_available() else "cpu")
     device='cpu'
     G_in.eval()
-    x,y= get_toy_samples(1)
-    z_ = get_random_inputs((n_samples,50), dist=noise_dist) 
-    x_ = x.repeat(n_samples,1)
+    z_ = get_random_inputs((n_samples,10), dist=noise_dist) 
     y_ = np.asarray(given_Y).reshape((1,1))
     y_ = to.from_numpy(y_).float().to(device).repeat(n_samples,1)
-    gan_out = G_in(z_.to(device), x_.to(device))
-    gan_out= gan_out.detach().cpu().numpy()
 
     nBins = 1000
     MyRange= [-0.5, 1.5]
-    gan_out = G_in(z_.to(device), y_)
-    gan_out = gan_out.detach().cpu().numpy()
+    x_gen = G_in(z_.to(device), y_)
+    x_gen = x_gen.detach().cpu().numpy()
     true_X=true_X_given_Y(given_Y)   
-    sns.kdeplot(np.squeeze(gan_out), shade=True, color="r", bw=0.001)
+    sns.kdeplot(np.squeeze(x_gen), shade=True, color="r", bw=0.001)
     sns.kdeplot(np.squeeze(true_X), shade=True, color="g", bw=0.001)
     y_plt1, _, _=plt.hist(np.squeeze(true_X), bins=nBins,range=MyRange, density=True,histtype='step')
-    y_plt2, _, _=plt.hist( np.squeeze(gan_out), bins=nBins,range=MyRange, density=True,histtype='step')
+    y_plt2, _, _=plt.hist( np.squeeze(x_gen), bins=nBins,range=MyRange, density=True,histtype='step')
 
     plt.title('Approximated densities of $p_x(x|y='+ str(given_Y) +'$ (green) and $p_{g(z)}(x|y='+ str(given_Y) +')$ (red)')
     plt.ylabel('Density')
@@ -62,6 +83,13 @@ def make_density_plot(G_in, given_Y, noise_dist, n_samples=10000, n_test_samples
 
     return
 
+def make_distance_plot(dist_list):
+    plt.plot(range(0, (len(dist_list))*10, 10), dist_list, markersize=1)
+    plt.title('Distance')
+    plt.xlabel('Updates of the generator')
+    plt.legend(loc="upper right")
+    plt.ylim(0, 0.5)
+    plt.show()
 
 ########################################################################
 ################## Data sampling
@@ -111,22 +139,20 @@ class generator(nn.Module):
     def __init__(self):
         super(generator, self).__init__()
 
-        self.noise_size = 50
+        self.noise_size = 10
         self.latent_size = 1
         self.input_dim = self.noise_size + self.latent_size
         self.output_dim = 1
 
         self.fc = nn.Sequential(
-            nn.Linear(self.input_dim, 1024),
-            nn.BatchNorm1d(1024),
+            nn.Linear(self.input_dim, 256),
+
             nn.ReLU(),
-            nn.Linear(1024, 512),
-            nn.BatchNorm1d(512),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(512, 256),
+            nn.Linear(256, 256),
             nn.ReLU(),
             nn.Linear(256, self.output_dim),
-            nn.Sigmoid(),
         )
 
         utils.initialize_weights(self)
@@ -148,12 +174,11 @@ class discriminator(nn.Module):
         self.output_dim = 1
 
         self.fc = nn.Sequential(
-            nn.Linear(self.input_dim, 1024),
+            nn.Linear(self.input_dim, 256),
             nn.LeakyReLU(0.2),
-            nn.Linear(1024, 1024),
-            nn.BatchNorm1d(1024),
+            nn.Linear(256, 256),
             nn.LeakyReLU(0.2),
-            nn.Linear(1024, self.output_dim),
+            nn.Linear(256, self.output_dim),
             nn.Sigmoid(),
         )
 
@@ -169,7 +194,6 @@ class InferGAN(object):
     def __init__(self, args):
         # parameters
         self.epoch = args.epoch
-        self.sample_num = 100
         self.batch_size = args.batch_size
         self.save_dir = args.save_dir
         self.result_dir = args.result_dir
@@ -206,7 +230,7 @@ class InferGAN(object):
         # load data
 
         self.data_X, self.data_Y = get_toy_samples(10000)
-        self.z_dim = 50
+        self.z_dim = 10
         self.y_dim = 1
 
         #print("data X")
@@ -220,6 +244,9 @@ class InferGAN(object):
         self.train_hist['G_loss'] = []
         self.train_hist['per_epoch_time'] = []
         self.train_hist['total_time'] = []
+        self.train_hist['KL_dist']=[]
+        self.train_hist['JS_dist']=[]
+        
 
         if self.gpu_mode:
             self.y_real_, self.y_fake_ = Variable(torch.ones(self.batch_size//2, 1).cuda()), Variable(torch.zeros(self.batch_size//2, 1).cuda())
@@ -229,7 +256,7 @@ class InferGAN(object):
         self.D.train()
         print('training start!!')
         start_time = time.time()
-        n_update_gen = 2
+        n_update_gen = 5
         for epoch in range(self.epoch):
             self.G.train()
             epoch_start_time = time.time()
@@ -266,6 +293,8 @@ class InferGAN(object):
 
                 if ((iter+1) % n_update_gen != 0):
                     # update D network
+                    self.D.train()
+                    self.G.eval()
                     self.D_optimizer.zero_grad()
 
                     D_real = self.D(x_, y_)
@@ -283,6 +312,8 @@ class InferGAN(object):
 
                 else:
                     # update G network
+                    self.G.train()
+                    self.D.eval()
                     self.G_optimizer.zero_grad()
 
                     G_ = self.G(z_, x_)
@@ -293,7 +324,7 @@ class InferGAN(object):
                     G_loss.backward()
                     self.G_optimizer.step()
 
-                if ((iter + 1) % 100) == 0:
+                if ((iter + 1) % 10) == 0:
                     print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f" %
                           ((epoch + 1), (iter + 1), len(self.data_X) // self.batch_size, D_loss.data, G_loss.data))
 
@@ -318,7 +349,8 @@ class InferGAN(object):
 
 
                     
-            if ((epoch+1) % 10) == 0:
+            if ((epoch+1) % 50) == 0:
+                
                 xD = range(len(self.train_hist['D_loss']))
                 xG = np.array(range(len(self.train_hist['G_loss'])))
                 xG = xG*(n_update_gen-1)
@@ -330,11 +362,22 @@ class InferGAN(object):
                 plt.plot(xG, medfilt(self.train_hist['G_loss'],11), label="loss G")
                 plt.legend()
                 plt.show()
-
-                make_density_plot(self.G, given_Y=0.1, noise_dist=self.noise_dist)
-                make_density_plot(self.G, given_Y=0.5, noise_dist=self.noise_dist)
-                make_density_plot(self.G, given_Y=0.9, noise_dist=self.noise_dist)
-                #self.G.cuda()
+                
+                KL_sum, JS_sum= 0, 0
+                for y in [0.1, 0.5, 0.9]:
+                    KL, JS= compute_distances(self.G, given_Y=y, noise_dist=self.noise_dist)
+                    make_density_plot(self.G, given_Y=y, noise_dist=self.noise_dist)
+                    KL_sum, JS_sum = KL_sum+KL, JS_sum+JS
+                self.train_hist['KL_dist'].append(KL_sum)                
+                self.train_hist['JS_dist'].append(JS_sum)
+                make_distance_plot(self.train_hist['KL_dist'])
+                make_distance_plot(self.train_hist['JS_dist'])
+                
+            
+        
+                print('KL divergence: {KL}' .format(KL=KL_sum))
+                print('JS divergence: {JS}' .format(JS=JS_sum))
+                    #self.G.cuda()
                 self.G.train()
 
 
